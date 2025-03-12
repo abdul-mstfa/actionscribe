@@ -1,103 +1,194 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Card } from "@/components/ui/card";
+import { FileText, List, Save, Loader2 } from "lucide-react";
+
+interface Action {
+  id: string;
+  text: string;
+  timestamp: number;
+  source: string;
+}
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [noteFormat, setNoteFormat] = useState<string>("txt");
+  const [noteContent, setNoteContent] = useState<string>("");
+  const [actions, setActions] = useState<Action[]>([]);
+  const [previousContent, setPreviousContent] = useState<string>("");
+  const [isProcessing, setIsProcessing] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  // Load saved actions from localStorage on mount
+  useEffect(() => {
+    const savedActions = localStorage.getItem('actions');
+    if (savedActions) {
+      setActions(JSON.parse(savedActions));
+    }
+  }, []);
+
+  // Save actions to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('actions', JSON.stringify(actions));
+  }, [actions]);
+
+  const extractNewContent = (oldContent: string, newContent: string): string => {
+    const oldLines = oldContent.split('\n');
+    const newLines = newContent.split('\n');
+    const addedLines = newLines.filter(line => !oldLines.includes(line));
+    return addedLines.join('\n');
+  };
+
+  const extractActionsWithAI = async (text: string) => {
+    try {
+      setIsProcessing(true);
+      
+      const response = await fetch('/api/extract-actions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to extract actions');
+      }
+
+      const data = await response.json();
+      
+      if (data.actions && data.actions !== "NO_ACTIONS") {
+        const newActionItems = data.actions
+          .split('\n')
+          .filter((line: string) => line.trim())
+          .map((text: string) => ({
+            id: Math.random().toString(36).substr(2, 9),
+            text: text.trim(),
+            timestamp: Date.now(),
+            source: 'ai'
+          }));
+
+        // Append new actions without duplicates
+        setActions(prevActions => {
+          const existingTexts = new Set(prevActions.map(a => a.text.toLowerCase()));
+          const uniqueNewActions = newActionItems.filter(
+            (action: Action) => !existingTexts.has(action.text.toLowerCase())
+          );
+          return [...prevActions, ...uniqueNewActions];
+        });
+      }
+    } catch (error) {
+      console.error('Error extracting actions:', error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSaveAndExtract = async () => {
+    const newContent = extractNewContent(previousContent, noteContent);
+    if (newContent.trim()) {
+      await extractActionsWithAI(newContent);
+    }
+    setPreviousContent(noteContent);
+  };
+
+  const formatTimestamp = (timestamp: number) => {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(timestamp);
+  };
+
+  return (
+    <main className="container mx-auto p-4">
+      <h1 className="text-4xl font-bold mb-8 text-center">ActionScribe</h1>
+      
+      <div className="grid grid-cols-2 gap-6">
+        {/* Left Column - Note Input */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-4 mb-4">
+            <Select value={noteFormat} onValueChange={setNoteFormat}>
+              <SelectTrigger className="w-32">
+                <SelectValue placeholder="Format" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="txt">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    <span>.txt</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="md">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    <span>.md</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            
+            <Button
+              onClick={handleSaveAndExtract}
+              className="ml-auto"
+              disabled={isProcessing}
+            >
+              {isProcessing ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4 mr-2" />
+              )}
+              {isProcessing ? 'Processing...' : 'Save & Extract'}
+            </Button>
+          </div>
+          
+          <Textarea
+            placeholder="Enter your notes here..."
+            className="min-h-[600px] font-mono"
+            value={noteContent}
+            onChange={(e) => setNoteContent(e.target.value)}
+          />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+        {/* Right Column - Extracted Actions */}
+        <div>
+          <Card className="p-4">
+            <div className="flex items-center gap-2 mb-4">
+              <List className="w-5 h-5" />
+              <h2 className="text-xl font-semibold">Extracted Actions</h2>
+              <span className="ml-auto text-sm text-muted-foreground">
+                {actions.length} items
+              </span>
+            </div>
+            
+            <div className="space-y-2">
+              {actions.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">
+                  No actions extracted yet. Write some notes and click "Save & Extract"!
+                </p>
+              ) : (
+                actions.map((action) => (
+                  <div
+                    key={action.id}
+                    className="p-3 rounded-lg bg-muted/50 flex items-start gap-2"
+                  >
+                    <div className="w-4 h-4 mt-1 rounded-full border-2 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p>{action.text}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {formatTimestamp(action.timestamp)}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </div>
+      </div>
+    </main>
   );
 }
